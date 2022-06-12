@@ -1,78 +1,89 @@
 import requests
-import time
-import pprint
 import json
+import time
 from api_secrets import API_KEY_ASSEMBLYAI, API_KEY_LISTENNOTES
+import pprint
 
-transcription_endpoint = "https://api.assemblyai.com/v2/transcript"
+
+transcript_endpoint = 'https://api.assemblyai.com/v2/transcript'
 headers_assemblyai = {
     "authorization": API_KEY_ASSEMBLYAI,
     "content-type": "application/json"
 }
 
 listennotes_episode_endpoint = 'https://listen-api.listennotes.com/api/v2/episodes'
-listennotes_headers = {'X-ListenAPI-Key': API_KEY_LISTENNOTES}
+headers_listennotes = {
+  'X-ListenAPI-Key': API_KEY_LISTENNOTES,
+}
 
-#listenotes.ai
 
 def get_episode_audio_url(episode_id):
     url = listennotes_episode_endpoint + '/' + episode_id
-    response = requests.request('GET', url, headers = listennotes_headers)
+    response = requests.request('GET', url, headers=headers_listennotes)
 
     data = response.json()
-    pprint.pprint(data)
+    # pprint.pprint(data)
 
-    audio_url = data['audio']
     episode_title = data['title']
     thumbnail = data['thumbnail']
     podcast_title = data['podcast']['title']
-
-
-
+    audio_url = data['audio']
     return audio_url, thumbnail, podcast_title, episode_title
 
-#transcribe
 def transcribe(audio_url, auto_chapters):
-    transcript_request = { "audio_url": audio_url, 'auto_chapters': auto_chapters }
-    transcript_response = requests.post(transcription_endpoint, json=transcript_request, headers=headers_assemblyai)
-    job_id = transcript_response.json()['id']
-    return job_id
+    transcript_request = {
+        'audio_url': audio_url,
+        'auto_chapters': auto_chapters
+    }
+
+    transcript_response = requests.post(transcript_endpoint, json=transcript_request, headers=headers_assemblyai)
+    pprint.pprint(transcript_response.json())
+    return transcript_response.json()['id']
 
 
-
-#polling
 def poll(transcript_id):
-    polling_endpoint = transcription_endpoint + '/' + transcript_id
+    polling_endpoint = transcript_endpoint + '/' + transcript_id
     polling_response = requests.get(polling_endpoint, headers=headers_assemblyai)
     return polling_response.json()
+    
 
-#asking assembly.ai if transcription is done
-def get_transcription_result_url(audio_url, auto_chapters):
-    transcript_id = transcribe(audio_url, auto_chapters)
+
+def get_transcription_result_url(url, auto_chapters):
+    transcribe_id = transcribe(url, auto_chapters)
     while True:
-        data = poll(transcript_id)
+        data = poll(transcribe_id)
         if data['status'] == 'completed':
             return data, None
         elif data['status'] == 'error':
             return data, data['error']
-    
-        print('Waiting 30 seconds...')
-        time.sleep(30)
 
+        print("waiting for 60 seconds")
+        time.sleep(60)
+            
 
-
-
-#save transcript
-
-def save_transcript(audio_url, filename):
-
-    data,error = get_transcription_result_url(audio_url)
-
+def save_transcript(episode_id):
+    audio_url, thumbnail, podcast_title, episode_title = get_episode_audio_url(episode_id)
+    data, error = get_transcription_result_url(audio_url, auto_chapters=True)
     if data:
-        text_filename = filename + ".txt"
-        with open(text_filename, "w") as f:
+        filename = episode_id + '.txt'
+        with open(filename, 'w') as f:
             f.write(data['text'])
-        print('Transcription Saved!!')
+
+        filename = episode_id + '_chapters.json'
+        with open(filename, 'w') as f:
+            chapters = data['chapters']
+
+            data = {'chapters': chapters}
+            data['audio_url']=audio_url
+            data['thumbnail']=thumbnail
+            data['podcast_title']=podcast_title
+            data['episode_title']=episode_title
+            # for key, value in kwargs.items():
+            #     data[key] = value
+
+            json.dump(data, f, indent=4)
+            print('Transcript saved')
+            return True
     elif error:
-        print('there was an error!')
-    print(data)
+        print("Error!!!", error)
+        return False
